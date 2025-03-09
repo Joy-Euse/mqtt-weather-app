@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQTT Weather Dashboard</title>
+
+    <!-- External Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+    <!-- Internal CSS -->
+    <style>
+        body {
+            background: #e6f2ff;
+            font-family: Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            text-align: center;
+            padding: 30px;
+            background-color: #007BFF;
+            color: #fff;
+        }
+        main {
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .dashboard {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 25px;
+            width: 70%;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+            border: 1px solid #ddd;
+        }
+        .readings {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+        }
+        .reading-item {
+            font-size: 22px;
+            font-weight: 600;
+            color: #333;
+        }
+        .chart-section {
+            position: relative;
+            height: 400px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Weather Station via MQTT</h1>
+    </header>
+
+    <main>
+        <div class="dashboard">
+            <div class="readings">
+                <div class="reading-item">Temperature: <span id="tempValue">--</span> °C</div>
+                <div class="reading-item">Humidity: <span id="humidityValue">--</span> %</div>
+            </div>
+            <div class="chart-section">
+                <canvas id="weatherGraph"></canvas>
+            </div>
+        </div>
+    </main>
+
+    <!-- Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const brokerUrl = 'ws://157.173.101.159:9001';
+            const temperatureTopic = "/work_group_01/room_temp/temperature";
+            const humidityTopic = "/work_group_01/room_temp/humidity";
+
+            const client = mqtt.connect(brokerUrl);
+
+            const tempDisplay = document.getElementById('tempValue');
+            const humidityDisplay = document.getElementById('humidityValue');
+            const graphContext = document.getElementById('weatherGraph').getContext('2d');
+
+            const weatherGraph = new Chart(graphContext, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Temperature (°C)',
+                            data: [],
+                            borderColor: 'rgb(255, 99, 132)',
+                            tension: 0.3,
+                            fill: false
+                        },
+                        {
+                            label: 'Humidity (%)',
+                            data: [],
+                            borderColor: 'rgb(54, 162, 235)',
+                            tension: 0.3,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute',
+                                tooltipFormat: 'PPpp',
+                                displayFormats: {
+                                    minute: 'HH:mm'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time (HH:mm)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Measurement'
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    }
+                }
+            });
+
+            client.on('connect', function () {
+                console.log('MQTT WebSocket connected!');
+                client.subscribe([temperatureTopic, humidityTopic]);
+            });
+
+            client.on('message', function (topic, payload) {
+                const dataValue = parseFloat(payload.toString());
+                const now = new Date();
+
+                if (topic === temperatureTopic) {
+                    tempDisplay.textContent = dataValue.toFixed(2);
+                    weatherGraph.data.labels.push(now);
+                    weatherGraph.data.datasets[0].data.push(dataValue);
+                }
+
+                if (topic === humidityTopic) {
+                    humidityDisplay.textContent = dataValue.toFixed(2);
+                    weatherGraph.data.datasets[1].data.push(dataValue);
+                }
+
+                weatherGraph.update();
+            });
+
+            // Fetch data from server every 5 minutes (300000ms)
+            setInterval(fetchHistoricalData, 300000);
+
+            function fetchHistoricalData() {
+                fetch('/data')
+                    .then(res => res.json())
+                    .then(dataSet => {
+                        console.log('Historical data loaded:', dataSet);
+
+                        const lastRecords = dataSet.slice(-20);
+                        const timeLabels = lastRecords.map(entry => new Date(entry.timestamp));
+                        const tempPoints = lastRecords.map(entry => entry.temperature);
+                        const humidityPoints = lastRecords.map(entry => entry.humidity);
+
+                        weatherGraph.data.labels = timeLabels;
+                        weatherGraph.data.datasets[0].data = tempPoints;
+                        weatherGraph.data.datasets[1].data = humidityPoints;
+
+                        weatherGraph.update();
+                    })
+                    .catch(err => console.error('Error fetching historical data:', err));
+            }
+        });
+    </script>
+
+</body>
+</html>
